@@ -9,25 +9,43 @@ app.use(cors());
 // --- MANIFEST ---
 const manifest = {
     id: 'com.yourusername.stremthru.search.final',
-    version: '1.2.0', // Incremented version again
+    version: '1.3.0', // Incremented version
     name: 'StremThru Search',
     description: 'A direct search addon for Stremio using StremThru.',
+    // We will respond to any search type.
     types: ['movie', 'series', 'other'],
     resources: ['catalog', 'stream'],
+    // This is the critical fix: We MUST provide a catalog entry for EACH type we support.
+    // They all share the same ID to signal they are the same search provider.
     catalogs: [
         {
             type: 'movie',
-            id: 'stremthru-search-catalog', // A single, consistent ID for our catalog
+            id: 'stremthru-search',
             name: 'StremThru Search',
-            // This 'extra' property is the modern way to tell Stremio this catalog is searchable.
+            extra: [{ name: 'search', isRequired: true }]
+        },
+        {
+            type: 'series',
+            id: 'stremthru-search',
+            name: 'StremThru Search',
+            extra: [{ name: 'search', isRequired: true }]
+        },
+        {
+            type: 'other',
+            id: 'stremthru-search',
+            name: 'StremThru Search',
             extra: [{ name: 'search', isRequired: true }]
         }
     ],
-    // This tells Stremio that our addon is responsible for providing streams for IDs that start with "search:"
     idPrefixes: ['search:']
 };
 
-// Endpoint to serve the manifest. This is the first thing Stremio calls.
+// A simple root endpoint to confirm the server is running.
+app.get('/', (req, res) => {
+    res.send('StremThru Search Addon is running!');
+});
+
+// Endpoint to serve the manifest.
 app.get('/:config?/manifest.json', (req, res) => {
     console.log("--- MANIFEST REQUEST ---");
     console.log("Config:", req.params.config || "None");
@@ -48,13 +66,11 @@ app.get('/:config/catalog/:type/:id.json', (req, res) => {
         return res.json({ metas: [] });
     }
 
-    // This is our "hacky" but correct approach. We create a single, fake search result.
-    // Its ID contains the user's search query, encoded in Base64 to be URL-safe.
     const encodedQuery = Buffer.from(search).toString('base64');
     
     const meta = {
         id: `search:${encodedQuery}`,
-        type: type, // The type must match what Stremio asked for
+        type: type,
         name: `Search results for "${search}"`,
         poster: "https://raw.githubusercontent.com/g0ldyy/comet/main/comet/templates/comet_icon.png",
         description: `Click to find streams for "${search}" via StremThru.`
@@ -77,11 +93,10 @@ app.get('/:config/stream/:type/:id.json', async (req, res) => {
     }
 
     try {
-        const encodedQuery = id.substring(7); // Remove "search:"
+        const encodedQuery = id.substring(7);
         const searchQuery = Buffer.from(encodedQuery, 'base64').toString('utf8');
         console.log(`Decoded search query: "${searchQuery}"`);
 
-        // Forward the decoded query to StremThru
         const stremThruUrl = `https://stremthru.13377001.xyz/${config}/torz/search?query=${encodeURIComponent(searchQuery)}`;
         
         console.log(`Forwarding to StremThru: ${stremThruUrl}`);
