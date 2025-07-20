@@ -1,14 +1,14 @@
 const express = require('express');
-const cors = require('cors'); // <-- ADD THIS LINE
+const cors = require('cors');
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.use(cors()); // <-- AND ADD THIS LINE
+app.use(cors());
 
 // This is the configuration for our addon.
 const manifest = {
     id: 'com.yourusername.stremthru.search',
-    version: '1.0.0',
+    version: '1.0.1', // Incremented version
     name: 'StremThru Search',
     description: 'A simple addon to search for content using StremThru.',
     types: ['movie', 'series'],
@@ -16,15 +16,15 @@ const manifest = {
     catalogs: [
         {
             type: 'movie',
-            id: 'stremthru-search-movie',
+            id: 'stremthru-search', // Simplified ID
             name: 'StremThru Search',
-            extra: { searchSupported: true }
+            extra: [{ name: 'search', isRequired: true }] // More robust search declaration
         },
         {
             type: 'series',
-            id: 'stremthru-search-series',
+            id: 'stremthru-search', // Simplified ID
             name: 'StremThru Search',
-            extra: { searchSupported: true }
+            extra: [{ name: 'search', isRequired: true }] // More robust search declaration
         }
     ],
     idPrefixes: ['search:']
@@ -41,12 +41,15 @@ app.get('/:config/catalog/:type/:id.json', (req, res) => {
     const { type } = req.params;
     const { search } = req.query;
 
+    // ADDED LOGGING
+    console.log(`Received catalog request for type: ${type}, search: "${search}"`);
+
     if (!search) {
+        console.log("No search query provided. Returning empty metas.");
         return res.json({ metas: [] });
     }
 
     // Create a single "meta" object that represents the search action.
-    // Its ID contains the search query, encoded so it can be passed in a URL.
     const searchQuery = search;
     const encodedQuery = Buffer.from(searchQuery).toString('base64');
     
@@ -54,10 +57,11 @@ app.get('/:config/catalog/:type/:id.json', (req, res) => {
         id: `search:${encodedQuery}`,
         type: type,
         name: `Search results for "${searchQuery}"`,
-        poster: "https://raw.githubusercontent.com/g0ldyy/comet/main/comet/templates/comet_icon.png", // Using Comet's icon for a nice visual
+        poster: "https://raw.githubusercontent.com/g0ldyy/comet/main/comet/templates/comet_icon.png",
         description: `Click to search for streams for "${searchQuery}" on your Debrid service via StremThru.`
     };
-
+    
+    console.log("Returning search meta object:", meta);
     res.json({ metas: [meta] });
 });
 
@@ -65,7 +69,10 @@ app.get('/:config/catalog/:type/:id.json', (req, res) => {
 app.get('/:config/stream/:type/:id.json', async (req, res) => {
     const { config, id } = req.params;
 
+    console.log(`Received stream request for ID: ${id}`);
+
     if (!id.startsWith('search:')) {
+        console.log("ID does not start with 'search:'. Returning empty streams.");
         return res.json({ streams: [] });
     }
 
@@ -73,7 +80,6 @@ app.get('/:config/stream/:type/:id.json', async (req, res) => {
         const encodedQuery = id.substring(7); // Remove "search:" prefix
         const searchQuery = Buffer.from(encodedQuery, 'base64').toString('utf8');
 
-        // The StremThru service does all the hard work.
         const stremThruUrl = `https://stremthru.13377001.xyz/${config}/torz/search?query=${encodeURIComponent(searchQuery)}`;
         
         console.log(`Forwarding search to StremThru: ${stremThruUrl}`);
@@ -84,6 +90,7 @@ app.get('/:config/stream/:type/:id.json', async (req, res) => {
         }
         
         const streams = await response.json();
+        console.log(`Received ${streams.streams ? streams.streams.length : 0} streams from StremThru.`);
 
         res.setHeader('Content-Type', 'application/json');
         res.send(streams);
