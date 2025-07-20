@@ -5,95 +5,67 @@ const port = process.env.PORT || 3000;
 
 app.use(cors());
 
-// This is the configuration for our addon.
+// --- MANIFEST ---
+// This is a "search-only" manifest. It tells Stremio that this addon
+// doesn't have its own catalog page, it ONLY responds to search queries.
 const manifest = {
     id: 'com.yourusername.stremthru.search',
-    version: '1.0.1', // Incremented version
-    name: 'StremThru Search',
-    description: 'A simple addon to search for content using StremThru.',
-    types: ['movie', 'series'],
-    resources: ['catalog', 'stream'],
-    catalogs: [
-        {
-            type: 'movie',
-            id: 'stremthru-search', // Simplified ID
-            name: 'StremThru Search',
-            extra: [{ name: 'search', isRequired: true }] // More robust search declaration
-        },
-        {
-            type: 'series',
-            id: 'stremthru-search', // Simplified ID
-            name: 'StremThru Search',
-            extra: [{ name: 'search', isRequired: true }] // More robust search declaration
-        }
+    version: '1.1.0', // Incremented version
+    name: 'StremThru Search (Direct)',
+    description: 'A direct search addon for Stremio using StremThru.',
+    types: ['movie', 'series', 'other'], // We will respond to any search type
+    resources: [
+        // This is the key change. We tell Stremio we only provide streams.
+        // Stremio will automatically call this endpoint with a search query.
+        { name: 'stream', types: ['movie', 'series', 'other'], idPrefixes: ['search:'] }
     ],
-    idPrefixes: ['search:']
+    catalogs: [] // We provide no catalogs, so we don't show up on the Discover page.
 };
 
 // Endpoint to serve the manifest
 app.get('/:config?/manifest.json', (req, res) => {
+    console.log("Manifest requested with config:", req.params.config);
     res.setHeader('Content-Type', 'application/json');
     res.send(manifest);
 });
 
-// Catalog endpoint - this is where the search "trick" happens
-app.get('/:config/catalog/:type/:id.json', (req, res) => {
-    const { type } = req.params;
-    const { search } = req.query;
-
-    // ADDED LOGGING
-    console.log(`Received catalog request for type: ${type}, search: "${search}"`);
-
-    if (!search) {
-        console.log("No search query provided. Returning empty metas.");
-        return res.json({ metas: [] });
-    }
-
-    // Create a single "meta" object that represents the search action.
-    const searchQuery = search;
-    const encodedQuery = Buffer.from(searchQuery).toString('base64');
-    
-    const meta = {
-        id: `search:${encodedQuery}`,
-        type: type,
-        name: `Search results for "${searchQuery}"`,
-        poster: "https://raw.githubusercontent.com/g0ldyy/comet/main/comet/templates/comet_icon.png",
-        description: `Click to search for streams for "${searchQuery}" on your Debrid service via StremThru.`
-    };
-    
-    console.log("Returning search meta object:", meta);
-    res.json({ metas: [meta] });
-});
-
-// Stream endpoint - this does the actual work
+// --- STREAM ENDPOINT ---
+// This is now our ONLY functional endpoint.
+// Stremio's search will hit this URL directly. The movie/series ID will contain the search query.
 app.get('/:config/stream/:type/:id.json', async (req, res) => {
-    const { config, id } = req.params;
+    const { config, type, id } = req.params;
+    
+    console.log(`--- Stream Request Received ---`);
+    console.log(`Type: ${type}, ID: ${id}`);
+    
+    // The search query is embedded in the 'id' after the last colon.
+    // Example: id = "tt12345:1:1:search=Mia Melano" -> we extract "Mia Melano"
+    const searchQuery = id.split(':').pop().replace('search=', '');
 
-    console.log(`Received stream request for ID: ${id}`);
-
-    if (!id.startsWith('search:')) {
-        console.log("ID does not start with 'search:'. Returning empty streams.");
+    if (!searchQuery) {
+        console.log("No search query found in ID. Returning empty streams.");
         return res.json({ streams: [] });
     }
 
-    try {
-        const encodedQuery = id.substring(7); // Remove "search:" prefix
-        const searchQuery = Buffer.from(encodedQuery, 'base64').toString('utf8');
+    console.log(`Extracted search query: "${searchQuery}"`);
 
+    try {
+        // The StremThru service does all the hard work.
         const stremThruUrl = `https://stremthru.13377001.xyz/${config}/torz/search?query=${encodeURIComponent(searchQuery)}`;
         
         console.log(`Forwarding search to StremThru: ${stremThruUrl}`);
 
         const response = await fetch(stremThruUrl);
         if (!response.ok) {
+            console.error(`StremThru returned an error: ${response.status} ${response.statusText}`);
             throw new Error(`StremThru returned an error: ${response.status}`);
         }
         
-        const streams = await response.json();
-        console.log(`Received ${streams.streams ? streams.streams.length : 0} streams from StremThru.`);
+        const data = await response.json();
+        console.log(`Received ${data.streams ? data.streams.length : 0} streams from StremThru.`);
 
         res.setHeader('Content-Type', 'application/json');
-        res.send(streams);
+        res.send(data);
 
     } catch (error) {
         console.error("Error fetching from StremThru:", error);
