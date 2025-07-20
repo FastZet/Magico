@@ -1,6 +1,9 @@
 const express = require('express');
+const cors = require('cors'); // <-- ADD THIS LINE
 const app = express();
 const port = process.env.PORT || 3000;
+
+app.use(cors()); // <-- AND ADD THIS LINE
 
 // This is the configuration for our addon.
 const manifest = {
