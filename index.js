@@ -3,36 +3,33 @@ const cors = require('cors');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// This enables CORS, which is crucial for Stremio Web to access your addon.
 app.use(cors());
 
 // --- MANIFEST ---
 const manifest = {
     id: 'com.yourusername.stremthru.search.final',
-    version: '1.3.0', // Incremented version
+    version: '1.4.0', // Incremented version
     name: 'StremThru Search',
     description: 'A direct search addon for Stremio using StremThru.',
-    // We will respond to any search type.
     types: ['movie', 'series', 'other'],
     resources: ['catalog', 'stream'],
-    // This is the critical fix: We MUST provide a catalog entry for EACH type we support.
-    // They all share the same ID to signal they are the same search provider.
     catalogs: [
+        // Each catalog MUST have a unique ID. Stremio will use this ID in the URL.
         {
             type: 'movie',
-            id: 'stremthru-search',
+            id: 'stremthru-movie-search',
             name: 'StremThru Search',
             extra: [{ name: 'search', isRequired: true }]
         },
         {
             type: 'series',
-            id: 'stremthru-search',
+            id: 'stremthru-series-search',
             name: 'StremThru Search',
             extra: [{ name: 'search', isRequired: true }]
         },
         {
             type: 'other',
-            id: 'stremthru-search',
+            id: 'stremthru-other-search',
             name: 'StremThru Search',
             extra: [{ name: 'search', isRequired: true }]
         }
@@ -40,12 +37,14 @@ const manifest = {
     idPrefixes: ['search:']
 };
 
+// --- ROUTES ---
+
 // A simple root endpoint to confirm the server is running.
 app.get('/', (req, res) => {
     res.send('StremThru Search Addon is running!');
 });
 
-// Endpoint to serve the manifest.
+// Endpoint for the manifest.
 app.get('/:config?/manifest.json', (req, res) => {
     console.log("--- MANIFEST REQUEST ---");
     console.log("Config:", req.params.config || "None");
@@ -53,16 +52,17 @@ app.get('/:config?/manifest.json', (req, res) => {
     res.send(manifest);
 });
 
-// Catalog endpoint. Stremio's search bar calls this.
+// Catalog endpoint. This is the one that was failing before.
+// It now correctly listens for the unique IDs we defined in the manifest.
 app.get('/:config/catalog/:type/:id.json', (req, res) => {
-    const { type } = req.params;
+    const { type, id } = req.params;
     const { search } = req.query;
 
     console.log("--- CATALOG REQUEST ---");
-    console.log(`Type: ${type}, Search Query: "${search}"`);
+    console.log(`Type: ${type}, ID: ${id}, Search Query: "${search}"`);
 
     if (!search) {
-        console.log("No search query provided. Responding with empty list.");
+        console.log("No search query. Responding with empty list.");
         return res.json({ metas: [] });
     }
 
@@ -71,7 +71,7 @@ app.get('/:config/catalog/:type/:id.json', (req, res) => {
     const meta = {
         id: `search:${encodedQuery}`,
         type: type,
-        name: `Search results for "${search}"`,
+        name: `Search: ${search}`,
         poster: "https://raw.githubusercontent.com/g0ldyy/comet/main/comet/templates/comet_icon.png",
         description: `Click to find streams for "${search}" via StremThru.`
     };
@@ -80,7 +80,7 @@ app.get('/:config/catalog/:type/:id.json', (req, res) => {
     res.json({ metas: [meta] });
 });
 
-// Stream endpoint. Stremio calls this AFTER you click on our fake search result.
+// Stream endpoint. This will be called when you click the fake search result.
 app.get('/:config/stream/:type/:id.json', async (req, res) => {
     const { config, type, id } = req.params;
 
@@ -88,7 +88,7 @@ app.get('/:config/stream/:type/:id.json', async (req, res) => {
     console.log(`Type: ${type}, ID: ${id}`);
 
     if (!id.startsWith('search:')) {
-        console.log("ID is not a search query. Responding with empty streams.");
+        console.log("Not a search ID. Responding with empty streams.");
         return res.json({ streams: [] });
     }
 
@@ -104,7 +104,7 @@ app.get('/:config/stream/:type/:id.json', async (req, res) => {
         
         if (!response.ok) {
             const errorText = await response.text();
-            console.error(`StremThru returned an error: ${response.status}`, errorText);
+            console.error(`StremThru Error: ${response.status}`, errorText);
             throw new Error(`StremThru error: ${response.status}`);
         }
         
@@ -116,7 +116,7 @@ app.get('/:config/stream/:type/:id.json', async (req, res) => {
 
     } catch (error) {
         console.error("Error in stream endpoint:", error);
-        res.status(500).json({ streams: [], error: "An error occurred while fetching streams." });
+        res.status(500).json({ streams: [], error: "An error occurred." });
     }
 });
 
